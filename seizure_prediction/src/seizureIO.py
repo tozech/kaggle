@@ -1,7 +1,10 @@
 from scipy.io import loadmat
 import pandas as pd
+import numpy as np
 import csv
-import os
+import os, sys
+
+import lastwinning_features
 
 ictal_class_dict = {'interictal': 0, 'preictal': 1}
 def load_sample(patient, segment, ictal_class):
@@ -29,38 +32,78 @@ def load_file(fname):
     nSamplesSegment = ndata['nSamplesSegment']
     return pdata, iEEGsamplingRate, nSamplesSegment
 
-def get_patient_seq_class(fname):
+def get_patient_seq_class(fname, istest=False):
     fname = os.path.basename(fname)
-    I, J, K = fname.split('.')[0].split('_')
+    if istest:
+        prefix, I, J = fname.split('.')[0].split('_')
+        K = 'not_available_for_testset'
+    else:
+        I, J, K = fname.split('.')[0].split('_')
     return I, J, K
 
-preictal, r, n = load_sample(patient=1, segment=1, ictal_class='preictal')
+def folder2featurefile(inputdir, outputfname, write_header=False, istest=False):
+    feature_header = ["feat{0}".format(i) for i in range(0, 1610)]
+    if istest:
+        header = ["patient", "sequence"] + feature_header
+    else:
+        header = ["patient", "sequence", "class"] + feature_header
 
-outputfname = '../processed/train_1_f_std.csv'
+    if write_header:
+        with open(outputfname, 'w') as f:
+            csv_writer = csv.writer(f)
+            csv_writer.writerow([""] + header)
 
-feature_header = ["ch{0}_std".format(i) for i in range(1, 17)]
-header = ["patient", "sequence", "class"] + feature_header
+    for fname in os.listdir(inputdir):
+        I, J, K = get_patient_seq_class(fname, istest=istest)
+        try:
+            d, r, n = load_file(os.path.join(inputdir, fname))
 
-with open(outputfname, 'w') as f:
-    csv_writer = csv.writer(f)
-    csv_writer.writerow(header)
+            #df = pd.DataFrame(d.std()).transpose()
+            #df.columns = feature_header
+            
+            feature_vals = lastwinning_features.calculate_features(d.values, r, n)
+            data = np.array([feature_vals])
+            df = pd.DataFrame.from_records(data, columns=feature_header)
 
-inputdir = '../input/train_1'
-for fname in os.listdir(inputdir):
-    I, J, K = get_patient_seq_class(fname)
-    try:
-        d, r, n = load_file(os.path.join(inputdir, fname))
-        df = pd.DataFrame(d.std()).transpose()
-        df.columns = feature_header
-        df["patient"] = I
-        df["sequence"] = J
-        df["class"] = K
-        df = df[header]
-        df.to_csv(outputfname, header=False, mode="a")
-    except Exception as exc:
-        print((fname, exc))
+            df["patient"] = I
+            df["sequence"] = J
+            if not(K == 'not_available_for_testset'):
+                df["class"] = K
+            df = df[header]
+            df.to_csv(outputfname, header=False, mode="a")
+        except Exception as exc:
+            print((fname, exc))
 
+            
+if __name__ == "__main__":
+    outputfname = sys.argv[1]
+    if outputfname.startswith('test'):
+        outputfname = os.path.join('..', 'processed', outputfname)
+        print('Generate test data: {0}'.format(outputfname))
+        
+        inputdir = '../input/test_1_new'
+        folder2featurefile(inputdir, outputfname, write_header=True, istest=True)
 
+        inputdir = '../input/test_2_new'
+        folder2featurefile(inputdir, outputfname, write_header=False, istest=True)
+
+        inputdir = '../input/test_3_new'
+        folder2featurefile(inputdir, outputfname, write_header=False, istest=True)
+    else:
+        outputfname = os.path.join('..', 'processed', outputfname)
+        print('Generate training data: {0}'.format(outputfname))
+
+        inputdir = '../input/train_1'
+        folder2featurefile(inputdir, outputfname, write_header=True)
+
+        inputdir = '../input/train_2'
+        folder2featurefile(inputdir, outputfname, write_header=False)
+
+        inputdir = '../input/train_3'
+        folder2featurefile(inputdir, outputfname, write_header=False)
+
+    
+    
 if False:
     freqs = fftfreq(n, 1/r)
 
